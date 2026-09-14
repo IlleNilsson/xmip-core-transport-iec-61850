@@ -8,9 +8,8 @@
 //! `[11]` and `[12]` conclude. A variable is named by domain and item; the
 //! data is `Data`'s octet-string choice, `[9]`.
 
+use transport::ber::{self, INTEGER, NULL, SEQUENCE, VISIBLE_STRING, context};
 use transport::error::{Result, protocol_error};
-
-use crate::ber::{self, INTEGER, NULL, SEQUENCE, VISIBLE_STRING, context};
 
 /// The MMS version this crate proposes and accepts.
 pub const VERSION: i64 = 1;
