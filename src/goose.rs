@@ -9,9 +9,8 @@
 //! the two numbers, and then `allData`: here, octet strings.
 
 use ethernet::{Frame, Mac};
+use transport::ber::{self, context};
 use transport::error::{Result, protocol_error};
-
-use crate::ber::{self, context};
 
 /// The `EtherType` of every GOOSE frame.
 pub const ETHERTYPE: u16 = 0x88b8;

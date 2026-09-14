@@ -9,7 +9,8 @@
 //! unit and bay controller speaks it, MMS to the SCADA above on TCP port
 //! 102 and GOOSE sideways to its neighbours on raw Ethernet. What is here
 //! is the client-server side — the MMS PDUs this transport speaks
-//! ([`mms`]) on the BER it needs ([`ber`]), a client that initiates, reads,
+//! ([`mms`]) on the capability's BER (`transport::ber`, shared with snmp
+//! under ADR-0044), a client that initiates, reads,
 //! writes and concludes, and [`Session`], one client's worth of server for
 //! tests and the loopback — and the GOOSE frame with a Stream as its data
 //! set ([`goose`]). Two carriers, as the manifest declares: MMS rides
@@ -25,7 +26,6 @@
 //! `iec61850://host:102/XMIP/Stream`. A target is the same, or a bare
 //! `host:port` for the configured variable.
 
-pub mod ber;
 pub mod goose;
 pub mod mms;
 pub mod session;
@@ -38,6 +38,7 @@ pub use goose::Goose;
 pub use mms::Pdu;
 pub use session::{Event, Session};
 use transport::error::{Result, protocol_error};
+use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
 use transport::{Arrived, Directions, Transport};
@@ -283,25 +284,12 @@ impl Iec61850Transport {
     }
 }
 
-/// A bound server waiting for its one client: the variable it writes is
-/// the Stream.
-struct Listening {
-    transport: Iec61850Transport,
-    listener: TcpListener,
-    address: String,
-}
-
-impl FarEnd for Listening {
-    fn address(&self) -> &str {
-        &self.address
-    }
-
-    fn take_one(self: Box<Self>) -> Result<Arrived> {
-        let (domain, item) = (&self.transport.domain, &self.transport.item);
-        let mut session =
-            self.transport
-                .accept_one(&self.listener)?
-                .with_variable(domain, item, Vec::new());
+impl Accepting for Iec61850Transport {
+    fn take_one(&self, listener: &TcpListener) -> Result<Arrived> {
+        let (domain, item) = (&self.domain, &self.item);
+        let mut session = self
+            .accept_one(listener)?
+            .with_variable(domain, item, Vec::new());
         session.serve()?;
         let bytes = session
             .variable(domain, item)
@@ -319,11 +307,7 @@ impl FarEnd for Listening {
 impl Loopback for Iec61850Transport {
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
         let (listener, address) = self.bind()?;
-        Ok(Box::new(Listening {
-            transport: self.clone(),
-            listener,
-            address,
-        }))
+        Ok(Box::new(Listening::new(self.clone(), listener, address)))
     }
 
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
@@ -337,18 +321,7 @@ impl Loopback for Iec61850Transport {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The shapes a protocol breaks on, as the Playground lists them.
-    fn edge_payloads() -> Vec<(&'static str, Vec<u8>)> {
-        vec![
-            ("empty", Vec::new()),
-            ("one byte", vec![0x2a]),
-            ("every byte", (0..=255).collect()),
-            ("nul run", vec![0; 512]),
-            ("high bytes", vec![0xff; 512]),
-            ("crlf storm", b"\r\n".repeat(400)),
-        ]
-    }
+    use transport::payload::edge_payloads;
 
     #[test]
     fn a_loopback_round_writes_a_variable_on_an_association() {
