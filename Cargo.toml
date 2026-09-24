@@ -17,6 +17,8 @@ path = "src/lib.rs"
 # A Technology depends on its parent Capability, never the reverse
 # (repository-model.md).
 transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main" }
+# X.690, the tag-length-value MMS and GOOSE are framed with.
+asn1 = { package = "xmip-core-library-asn1", git = "https://github.com/IlleNilsson/xmip-core-library-asn1", branch = "main" }
 # The carriers, declared in architecture.toml: MMS rides ISO transport, so
 # cotp carries the client-server side; GOOSE is a raw frame, so ethernet
 # carries the publisher's.

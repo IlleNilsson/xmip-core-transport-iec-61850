@@ -8,8 +8,8 @@
 //! context-tagged fields name the control block, the data set, the time,
 //! the two numbers, and then `allData`: here, octet strings.
 
+use asn1::context;
 use ethernet::{Frame, Mac};
-use transport::ber::{self, context};
 use transport::error::{Result, protocol_error};
 
 /// The `EtherType` of every GOOSE frame.
@@ -48,28 +48,28 @@ impl Goose {
         let all_data: Vec<u8> = self
             .data
             .iter()
-            .flat_map(|entry| ber::tlv(OCTET_STRING_DATA, entry))
+            .flat_map(|entry| asn1::tlv(OCTET_STRING_DATA, entry))
             .collect();
         let entries = i64::try_from(self.data.len()).unwrap_or(i64::MAX);
         let fields = [
-            ber::tlv(context(0, false), self.gocb_ref.as_bytes()),
-            ber::tlv(
+            asn1::tlv(context(0, false), self.gocb_ref.as_bytes()),
+            asn1::tlv(
                 context(1, false),
-                &ber::integer(i64::from(self.time_allowed_to_live)),
+                &asn1::integer(i64::from(self.time_allowed_to_live)),
             ),
-            ber::tlv(context(2, false), self.dat_set.as_bytes()),
-            ber::tlv(context(3, false), self.go_id.as_bytes()),
-            ber::tlv(context(4, false), &self.time),
-            ber::tlv(context(5, false), &ber::integer(i64::from(self.st_num))),
-            ber::tlv(context(6, false), &ber::integer(i64::from(self.sq_num))),
-            ber::tlv(context(7, false), &[u8::from(self.simulation) * 0xff]),
-            ber::tlv(context(8, false), &ber::integer(i64::from(self.conf_rev))),
-            ber::tlv(context(9, false), &[u8::from(self.nds_com) * 0xff]),
-            ber::tlv(context(10, false), &ber::integer(entries)),
-            ber::tlv(context(11, true), &all_data),
+            asn1::tlv(context(2, false), self.dat_set.as_bytes()),
+            asn1::tlv(context(3, false), self.go_id.as_bytes()),
+            asn1::tlv(context(4, false), &self.time),
+            asn1::tlv(context(5, false), &asn1::integer(i64::from(self.st_num))),
+            asn1::tlv(context(6, false), &asn1::integer(i64::from(self.sq_num))),
+            asn1::tlv(context(7, false), &[u8::from(self.simulation) * 0xff]),
+            asn1::tlv(context(8, false), &asn1::integer(i64::from(self.conf_rev))),
+            asn1::tlv(context(9, false), &[u8::from(self.nds_com) * 0xff]),
+            asn1::tlv(context(10, false), &asn1::integer(entries)),
+            asn1::tlv(context(11, true), &all_data),
         ]
         .concat();
-        let pdu = ber::tlv(GOOSE_PDU, &fields);
+        let pdu = asn1::tlv(GOOSE_PDU, &fields);
         let mut out = Vec::with_capacity(8 + pdu.len());
         out.extend_from_slice(&self.app_id.to_be_bytes());
         out.extend_from_slice(
@@ -96,14 +96,14 @@ impl Goose {
         if length != payload.len() {
             return Err(protocol_error("a GOOSE length that is not the payload's"));
         }
-        let (tag, fields, _) = ber::read(&payload[8..])?;
+        let (tag, fields, _) = asn1::read(&payload[8..])?;
         if tag != GOOSE_PDU {
             return Err(protocol_error("a PDU that is not a goosePDU"));
         }
-        let fields = ber::read_all(fields)?;
-        let field = |n: u8| ber::find(&fields, context(n, false));
+        let fields = asn1::read_all(fields)?;
+        let field = |n: u8| asn1::find(&fields, context(n, false));
         let number = |n: u8| -> Result<u32> {
-            u32::try_from(ber::read_integer(field(n)?)?)
+            u32::try_from(asn1::read_integer(field(n)?)?)
                 .map_err(|_| protocol_error("a GOOSE number outside thirty-two bits"))
         };
         let string =
@@ -116,7 +116,7 @@ impl Goose {
         }
         time.copy_from_slice(stamp);
         let mut data = Vec::new();
-        for (tag, entry) in ber::read_all(ber::find(&fields, context(11, true))?)? {
+        for (tag, entry) in asn1::read_all(asn1::find(&fields, context(11, true))?)? {
             if tag != OCTET_STRING_DATA {
                 return Err(protocol_error(
                     "a data set entry that is not an octet string",
@@ -229,6 +229,6 @@ mod tests {
         let wire = goose.encode();
         assert!(wire.windows(3).any(|w| w == [context(7, false), 1, 0xff]));
         assert_eq!(Goose::decode(&wire).expect("flags"), goose);
-        assert_eq!(ber::BOOLEAN, 0x01, "the tag a bare BOOLEAN would carry");
+        assert_eq!(asn1::BOOLEAN, 0x01, "the tag a bare BOOLEAN would carry");
     }
 }

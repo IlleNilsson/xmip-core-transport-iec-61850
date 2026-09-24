@@ -9,8 +9,8 @@
 //! unit and bay controller speaks it, MMS to the SCADA above on TCP port
 //! 102 and GOOSE sideways to its neighbours on raw Ethernet. What is here
 //! is the client-server side — the MMS PDUs this transport speaks
-//! ([`mms`]) on the capability's BER (`transport::ber`, shared with snmp
-//! under ADR-0044), a client that initiates, reads,
+//! ([`mms`]) on the estate's X.690 reader (`xmip-core-library-asn1`,
+//! shared with snmp), a client that initiates, reads,
 //! writes and concludes, and [`Session`], one client's worth of server for
 //! tests and the loopback — and the GOOSE frame with a Stream as its data
 //! set ([`goose`]). Two carriers, as the manifest declares: MMS rides
