@@ -8,7 +8,7 @@
 //! `[11]` and `[12]` conclude. A variable is named by domain and item; the
 //! data is `Data`'s octet-string choice, `[9]`.
 
-use transport::ber::{self, INTEGER, NULL, SEQUENCE, VISIBLE_STRING, context};
+use asn1::{INTEGER, NULL, SEQUENCE, VISIBLE_STRING, context};
 use transport::error::{Result, protocol_error};
 
 /// The MMS version this crate proposes and accepts.
@@ -70,15 +70,15 @@ impl Pdu {
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         match self {
-            Self::Initiate => ber::tlv(INITIATE_REQUEST, &initiate_detail()),
-            Self::InitiateOk => ber::tlv(INITIATE_RESPONSE, &initiate_detail()),
+            Self::Initiate => asn1::tlv(INITIATE_REQUEST, &initiate_detail()),
+            Self::InitiateOk => asn1::tlv(INITIATE_RESPONSE, &initiate_detail()),
             Self::Write {
                 invoke,
                 domain,
                 item,
                 data,
             } => {
-                let list_of_data = ber::tlv(context(0, true), &ber::tlv(OCTET_STRING_DATA, data));
+                let list_of_data = asn1::tlv(context(0, true), &asn1::tlv(OCTET_STRING_DATA, data));
                 let body = [variables(domain, item), list_of_data].concat();
                 confirmed(CONFIRMED_REQUEST, *invoke, WRITE, &body)
             }
@@ -86,33 +86,33 @@ impl Pdu {
                 CONFIRMED_RESPONSE,
                 *invoke,
                 WRITE,
-                &ber::tlv(context(1, false), &[]),
+                &asn1::tlv(context(1, false), &[]),
             ),
             Self::WriteFailed { invoke, error } => confirmed(
                 CONFIRMED_RESPONSE,
                 *invoke,
                 WRITE,
-                &ber::tlv(context(0, false), &ber::integer(*error)),
+                &asn1::tlv(context(0, false), &asn1::integer(*error)),
             ),
             Self::Read {
                 invoke,
                 domain,
                 item,
             } => {
-                let specification = ber::tlv(context(1, true), &variables(domain, item));
+                let specification = asn1::tlv(context(1, true), &variables(domain, item));
                 confirmed(CONFIRMED_REQUEST, *invoke, READ, &specification)
             }
             Self::ReadOk { invoke, data } => {
-                let results = ber::tlv(context(1, true), &ber::tlv(OCTET_STRING_DATA, data));
+                let results = asn1::tlv(context(1, true), &asn1::tlv(OCTET_STRING_DATA, data));
                 confirmed(CONFIRMED_RESPONSE, *invoke, READ, &results)
             }
             Self::ReadFailed { invoke, error } => {
-                let failure = ber::tlv(context(0, false), &ber::integer(*error));
-                let results = ber::tlv(context(1, true), &failure);
+                let failure = asn1::tlv(context(0, false), &asn1::integer(*error));
+                let results = asn1::tlv(context(1, true), &failure);
                 confirmed(CONFIRMED_RESPONSE, *invoke, READ, &results)
             }
-            Self::Conclude => ber::tlv(CONCLUDE_REQUEST, &[]),
-            Self::ConcludeOk => ber::tlv(CONCLUDE_RESPONSE, &[]),
+            Self::Conclude => asn1::tlv(CONCLUDE_REQUEST, &[]),
+            Self::ConcludeOk => asn1::tlv(CONCLUDE_RESPONSE, &[]),
         }
     }
 
@@ -122,7 +122,7 @@ impl Pdu {
     /// Not one of the PDUs this crate speaks, or one whose shape is not as
     /// the specification lays it out.
     pub fn decode(bytes: &[u8]) -> Result<Self> {
-        let (tag, contents, rest) = ber::read(bytes)?;
+        let (tag, contents, rest) = asn1::read(bytes)?;
         if !rest.is_empty() {
             return Err(protocol_error("bytes after the PDU"));
         }
@@ -168,54 +168,54 @@ impl Pdu {
 /// no nesting, version 1, no parameter CBB, no services listed.
 fn initiate_detail() -> Vec<u8> {
     let detail = [
-        ber::tlv(context(0, false), &ber::integer(VERSION)),
-        ber::tlv(context(1, false), &[0x05, 0xf1, 0x00]),
-        ber::tlv(
+        asn1::tlv(context(0, false), &asn1::integer(VERSION)),
+        asn1::tlv(context(1, false), &[0x05, 0xf1, 0x00]),
+        asn1::tlv(
             context(2, false),
             &[0x03, 0xee, 0x18, 0x00, 0x00, 0x00, 0x00],
         ),
     ]
     .concat();
     [
-        ber::tlv(context(0, false), &ber::integer(MAX_PDU)),
-        ber::tlv(context(1, false), &ber::integer(1)),
-        ber::tlv(context(2, false), &ber::integer(1)),
-        ber::tlv(context(3, false), &ber::integer(0)),
-        ber::tlv(context(4, true), &detail),
+        asn1::tlv(context(0, false), &asn1::integer(MAX_PDU)),
+        asn1::tlv(context(1, false), &asn1::integer(1)),
+        asn1::tlv(context(2, false), &asn1::integer(1)),
+        asn1::tlv(context(3, false), &asn1::integer(0)),
+        asn1::tlv(context(4, true), &detail),
     ]
     .concat()
 }
 
 fn confirmed(tag: u8, invoke: u32, service: u8, body: &[u8]) -> Vec<u8> {
     let contents = [
-        ber::tlv(INTEGER, &ber::integer(i64::from(invoke))),
-        ber::tlv(service, body),
+        asn1::tlv(INTEGER, &asn1::integer(i64::from(invoke))),
+        asn1::tlv(service, body),
     ]
     .concat();
-    ber::tlv(tag, &contents)
+    asn1::tlv(tag, &contents)
 }
 
 /// `listOfVariable [0]` of one domain-specific name.
 fn variables(domain: &str, item: &str) -> Vec<u8> {
     let name = [
-        ber::tlv(VISIBLE_STRING, domain.as_bytes()),
-        ber::tlv(VISIBLE_STRING, item.as_bytes()),
+        asn1::tlv(VISIBLE_STRING, domain.as_bytes()),
+        asn1::tlv(VISIBLE_STRING, item.as_bytes()),
     ]
     .concat();
-    let object_name = ber::tlv(context(0, true), &ber::tlv(context(1, true), &name));
-    ber::tlv(context(0, true), &ber::tlv(SEQUENCE, &object_name))
+    let object_name = asn1::tlv(context(0, true), &asn1::tlv(context(1, true), &name));
+    asn1::tlv(context(0, true), &asn1::tlv(SEQUENCE, &object_name))
 }
 
 fn split_confirmed(contents: &[u8]) -> Result<(u32, u8, &[u8])> {
-    let (tag, invoke, rest) = ber::read(contents)?;
+    let (tag, invoke, rest) = asn1::read(contents)?;
     if tag != INTEGER {
         return Err(protocol_error(
             "a confirmed PDU without its invoke identifier",
         ));
     }
-    let invoke = u32::try_from(ber::read_integer(invoke)?)
+    let invoke = u32::try_from(asn1::read_integer(invoke)?)
         .map_err(|_| protocol_error("an invoke identifier outside thirty-two bits"))?;
-    let (service, body, rest) = ber::read(rest)?;
+    let (service, body, rest) = asn1::read(rest)?;
     if !rest.is_empty() {
         return Err(protocol_error("bytes after the service"));
     }
@@ -224,13 +224,13 @@ fn split_confirmed(contents: &[u8]) -> Result<(u32, u8, &[u8])> {
 
 /// The domain and item of a `listOfVariable [0]`.
 fn read_name(list: &[u8]) -> Result<(String, String)> {
-    let (_, sequence, _) = ber::read(list)?;
-    let (_, object_name, _) = ber::read(sequence)?;
-    let (tag, domain_specific, _) = ber::read(object_name)?;
+    let (_, sequence, _) = asn1::read(list)?;
+    let (_, object_name, _) = asn1::read(sequence)?;
+    let (tag, domain_specific, _) = asn1::read(object_name)?;
     if tag != context(1, true) {
         return Err(protocol_error("a name that is not domain-specific"));
     }
-    let parts = ber::read_all(domain_specific)?;
+    let parts = asn1::read_all(domain_specific)?;
     match parts.as_slice() {
         [(VISIBLE_STRING, domain), (VISIBLE_STRING, item)] => Ok((
             String::from_utf8_lossy(domain).into_owned(),
@@ -243,7 +243,7 @@ fn read_name(list: &[u8]) -> Result<(String, String)> {
 }
 
 fn read_octet_string(list: &[u8]) -> Result<Vec<u8>> {
-    let (tag, data, _) = ber::read(list)?;
+    let (tag, data, _) = asn1::read(list)?;
     if tag != OCTET_STRING_DATA {
         return Err(protocol_error("data that is not an octet string"));
     }
@@ -251,8 +251,8 @@ fn read_octet_string(list: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn decode_write(invoke: u32, body: &[u8]) -> Result<Pdu> {
-    let (_, list_of_variable, rest) = ber::read(body)?;
-    let (_, list_of_data, _) = ber::read(rest)?;
+    let (_, list_of_variable, rest) = asn1::read(body)?;
+    let (_, list_of_data, _) = asn1::read(rest)?;
     let (domain, item) = read_name(list_of_variable)?;
     Ok(Pdu::Write {
         invoke,
@@ -263,9 +263,9 @@ fn decode_write(invoke: u32, body: &[u8]) -> Result<Pdu> {
 }
 
 fn decode_read(invoke: u32, body: &[u8]) -> Result<Pdu> {
-    let elements = ber::read_all(body)?;
-    let specification = ber::find(&elements, context(1, true))?;
-    let (_, list_of_variable, _) = ber::read(specification)?;
+    let elements = asn1::read_all(body)?;
+    let specification = asn1::find(&elements, context(1, true))?;
+    let (_, list_of_variable, _) = asn1::read(specification)?;
     let (domain, item) = read_name(list_of_variable)?;
     Ok(Pdu::Read {
         invoke,
@@ -275,12 +275,12 @@ fn decode_read(invoke: u32, body: &[u8]) -> Result<Pdu> {
 }
 
 fn decode_write_result(invoke: u32, body: &[u8]) -> Result<Pdu> {
-    let (tag, contents, _) = ber::read(body)?;
+    let (tag, contents, _) = asn1::read(body)?;
     match tag {
         t if t == context(1, false) || t == NULL => Ok(Pdu::WriteOk { invoke }),
         t if t == context(0, false) => Ok(Pdu::WriteFailed {
             invoke,
-            error: ber::read_integer(contents)?,
+            error: asn1::read_integer(contents)?,
         }),
         _ => Err(protocol_error(
             "a write result that is neither success nor failure",
@@ -289,8 +289,8 @@ fn decode_write_result(invoke: u32, body: &[u8]) -> Result<Pdu> {
 }
 
 fn decode_read_result(invoke: u32, body: &[u8]) -> Result<Pdu> {
-    let (_, results, _) = ber::read(body)?;
-    let (tag, contents, _) = ber::read(results)?;
+    let (_, results, _) = asn1::read(body)?;
+    let (tag, contents, _) = asn1::read(results)?;
     match tag {
         OCTET_STRING_DATA => Ok(Pdu::ReadOk {
             invoke,
@@ -298,7 +298,7 @@ fn decode_read_result(invoke: u32, body: &[u8]) -> Result<Pdu> {
         }),
         t if t == context(0, false) => Ok(Pdu::ReadFailed {
             invoke,
-            error: ber::read_integer(contents)?,
+            error: asn1::read_integer(contents)?,
         }),
         _ => Err(protocol_error(
             "an access result that is neither data nor failure",
