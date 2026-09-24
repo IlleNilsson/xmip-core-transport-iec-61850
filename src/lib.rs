@@ -285,7 +285,7 @@ impl Iec61850Transport {
 }
 
 impl Accepting for Iec61850Transport {
-    fn take_one(&self, listener: &TcpListener) -> Result<Arrived> {
+    fn take_one(self, listener: &TcpListener) -> Result<Arrived> {
         let (domain, item) = (&self.domain, &self.item);
         let mut session = self
             .accept_one(listener)?
@@ -306,8 +306,7 @@ impl Accepting for Iec61850Transport {
 /// to its TPDU size: no ceiling is a fact of the protocol.
 impl Loopback for Iec61850Transport {
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
-        let (listener, address) = self.bind()?;
-        Ok(Box::new(Listening::new(self.clone(), listener, address)))
+        Ok(Box::new(Listening::new(self.clone(), self.bind()?)))
     }
 
     fn send_to(&self, address: &str, payload: &[u8]) -> Result<()> {
