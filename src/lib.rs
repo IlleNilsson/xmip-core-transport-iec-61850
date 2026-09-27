@@ -41,7 +41,8 @@ use transport::error::{Result, protocol_error};
 use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
-use transport::{Arrived, Directions, Transport};
+use transport::{Arrived, Configured, Directions, Transport};
+use xcore::settings::{Applies, Fixed, Kind, Presence, Read, Setting, Settings};
 
 /// The TSAP a client presents, and the one a server listens on.
 pub const CLIENT_TSAP: [u8; 2] = [0x00, 0x01];
@@ -275,6 +276,46 @@ impl Transport for Iec61850Transport {
     }
 }
 
+impl Configured for Iec61850Transport {
+    /// The address is the server's host and port, 102 by the standard:
+    /// where a Location connects.
+    const SETTINGS: &'static Settings = &Settings {
+        technology: env!("CARGO_PKG_NAME"),
+        settings: &[
+            Setting {
+                name: "domain",
+                kind: Kind::Text,
+                presence: Presence::Default(Fixed::Text(STREAM_DOMAIN)),
+                meaning: "The domain of the variable that is the Stream.",
+                applies: Applies::Both,
+            },
+            Setting {
+                name: "item",
+                kind: Kind::Text,
+                presence: Presence::Default(Fixed::Text(STREAM_ITEM)),
+                meaning: "The item of the variable that is the Stream, within its domain.",
+                applies: Applies::Both,
+            },
+            Setting {
+                name: "timeout",
+                kind: Kind::Duration,
+                presence: Presence::Optional,
+                meaning: "How long a peer that stops mid-message is waited on; unbounded when \
+                          left out.",
+                applies: Applies::Both,
+            },
+        ],
+    };
+
+    fn configured(address: &str, settings: &Read) -> Result<Self> {
+        let transport = Self::new(address).about(settings.text("domain"), settings.text("item"));
+        Ok(match settings.optional_duration("timeout") {
+            Some(timeout) => transport.timing_out_after(timeout),
+            None => transport,
+        })
+    }
+}
+
 impl Iec61850Transport {
     /// Both ends on this machine: an ephemeral local port, the loopback
     /// timeout on either side of the association.
@@ -320,6 +361,29 @@ impl Loopback for Iec61850Transport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn iec_61850_declares_its_settings_and_reads_through_them() {
+        use xcore::settings::Given;
+        assert_eq!(Iec61850Transport::SETTINGS.problems(), Vec::<String>::new());
+        let given = [
+            ("domain".to_string(), Given::Text("BAY1".to_string())),
+            ("timeout".to_string(), Given::Text("2s".to_string())),
+        ];
+        let built = Iec61850Transport::open("relay:102", Applies::Receive, &given).expect("built");
+        assert_eq!(built.domain, "BAY1");
+        assert_eq!(built.item, STREAM_ITEM);
+        assert_eq!(built.timeout, Some(Duration::from_secs(2)));
+        let given = [("domain".to_string(), Given::Integer(1))];
+        let Err(refused) = Iec61850Transport::open("relay:102", Applies::Send, &given) else {
+            panic!("a domain is text");
+        };
+        assert!(
+            refused.message.contains("\"domain\""),
+            "{}",
+            refused.message
+        );
+    }
     use transport::payload::edge_payloads;
 
     #[test]
