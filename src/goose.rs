@@ -155,7 +155,8 @@ impl Goose {
     ///
     /// # Errors
     /// As [`Goose::decode`].
-    pub fn from_frame(frame: &Frame) -> Result<Option<Self>> {
+    #[cfg(test)]
+    fn from_frame(frame: &Frame) -> Result<Option<Self>> {
         if frame.ethertype != ETHERTYPE {
             return Ok(None);
         }
