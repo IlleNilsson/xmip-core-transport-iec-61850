@@ -36,21 +36,21 @@ use std::time::Duration;
 use cotp::Connection;
 pub use goose::Goose;
 pub use mms::Pdu;
+use net::Target;
 pub use session::{Event, Session};
 use transport::error::{Result, protocol_error};
 use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::socket;
-use transport::{Arrived, Configured, Directions, Transport};
+use transport::{Arrived, Configured, Directions, Pool, Pooled, Transport};
 use xcore::settings::{Applies, Fixed, Kind, Presence, Read, Setting, Settings};
 
 /// The TSAP a client presents, and the one a server listens on.
-pub const CLIENT_TSAP: [u8; 2] = [0x00, 0x01];
-pub const SERVER_TSAP: [u8; 2] = [0x00, 0x01];
+const CLIENT_TSAP: [u8; 2] = [0x00, 0x01];
+const SERVER_TSAP: [u8; 2] = [0x00, 0x01];
 
 /// The variable a Stream travels as unless a target says otherwise.
-pub const STREAM_DOMAIN: &str = "XMIP";
-pub const STREAM_ITEM: &str = "Stream";
+const STREAM_DOMAIN: &str = "XMIP";
+const STREAM_ITEM: &str = "Stream";
 
 /// One association with a server.
 pub struct Client {
@@ -161,6 +161,13 @@ impl Client {
     }
 }
 
+impl Pooled for Client {
+    /// While the server has not closed the association's connection.
+    fn usable(&mut self) -> bool {
+        self.connection.usable()
+    }
+}
+
 fn refused(domain: &str, item: &str, error: i64) -> transport::TransportError {
     protocol_error(format!(
         "{domain}/{item}: the server answered data access error {error}"
@@ -173,6 +180,9 @@ pub struct Iec61850Transport {
     domain: String,
     item: String,
     timeout: Option<Duration>,
+    /// The associations a receive reads on and a send writes on,
+    /// initiated once per server and kept.
+    associations: Pool<Client>,
 }
 
 impl Iec61850Transport {
@@ -184,6 +194,7 @@ impl Iec61850Transport {
             domain: STREAM_DOMAIN.into(),
             item: STREAM_ITEM.into(),
             timeout: None,
+            associations: Pool::new(),
         }
     }
 
@@ -229,7 +240,9 @@ impl Iec61850Transport {
     /// `iec61850://host:102/<domain>/<item>` in full, or `host:port` for
     /// the configured variable.
     fn resolve(&self, target: &str) -> Result<(String, String, String)> {
-        let Some((authority, path)) = socket::target("iec61850", target) else {
+        let Some((authority, path)) =
+            Target::under(&["iec61850"], target).map(|named| (named.authority(), named.path()))
+        else {
             return Ok((target.to_string(), self.domain.clone(), self.item.clone()));
         };
         if path.is_empty() {
@@ -256,23 +269,29 @@ impl Transport for Iec61850Transport {
         Directions::BOTH
     }
 
-    /// One read of the variable: its bytes as one Stream.
+    /// One read of the variable, on the association kept for the server
+    /// and initiated on the first receive: its bytes as one Stream.
     fn receive(&self) -> Result<Vec<Arrived>> {
-        let mut client = self.connect(&self.bind)?;
-        let bytes = client.read(&self.domain, &self.item)?;
-        client.conclude()?;
+        let bytes = self.associations.exchange(
+            self.bind.as_str(),
+            || self.connect(&self.bind),
+            |client| client.read(&self.domain, &self.item),
+        )?;
         Ok(vec![Arrived::new(
             format!("iec61850://{}/{}/{}", self.bind, self.domain, self.item),
             bytes,
         )])
     }
 
-    /// One write of `bytes` to the variable `target` names.
+    /// One write of `bytes` to the variable `target` names, on the
+    /// association kept for its server and initiated on the first send.
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
         let (address, domain, item) = self.resolve(target)?;
-        let mut client = self.connect(&address)?;
-        client.write(&domain, &item, bytes)?;
-        client.conclude()
+        self.associations.exchange(
+            address.as_str(),
+            || self.connect(&address),
+            |client| client.write(&domain, &item, bytes),
+        )
     }
 }
 
@@ -417,18 +436,14 @@ mod tests {
         let server = Iec61850Transport::new("127.0.0.1:0").timing_out_after(Duration::from_secs(2));
         let (listener, address) = server.bind().expect("bind");
         let serving = std::thread::spawn(move || {
-            let mut first = server.accept_one(&listener).expect("accept").with_variable(
-                "XMIP",
-                "Stream",
-                b"held".to_vec(),
-            );
-            first.serve().expect("serve");
-            let mut second = server
+            // One server, so one association reads and writes.
+            let mut first = server
                 .accept_one(&listener)
-                .expect("accept again")
+                .expect("accept")
+                .with_variable("XMIP", "Stream", b"held".to_vec())
                 .with_variable("Relay", "Setting", vec![0]);
-            second.serve().expect("serve again");
-            second.variable("Relay", "Setting").map(<[u8]>::to_vec)
+            first.serve().expect("serve");
+            first.variable("Relay", "Setting").map(<[u8]>::to_vec)
         });
         let near = Iec61850Transport::new(&address).timing_out_after(Duration::from_secs(2));
         let arrived = near.receive().expect("read");
@@ -439,10 +454,61 @@ mod tests {
         );
         near.send(&format!("iec61850://{address}/Relay/Setting"), &[7, 7])
             .expect("write");
+        assert_eq!(near.associations.opened(), 1);
+        // Its kept association closes with it, which ends the serving.
+        drop(near);
+        let near = Iec61850Transport::new(&address);
         assert_eq!(serving.join().expect("thread"), Some(vec![7, 7]));
         assert_eq!(near.resolve("plc:102").expect("bare").1, "XMIP");
         assert!(near.resolve("iec61850://plc:102/only").is_err());
         assert!(near.resolve("iec61850://plc:102//item").is_err());
+    }
+
+    #[test]
+    fn a_thousand_reads_initiate_once_and_an_association_the_server_closed_is_replaced() {
+        const RECEIVES: usize = 1000;
+        let server = Iec61850Transport::new("127.0.0.1:0").timing_out_after(Duration::from_secs(5));
+        let (listener, address) = server.bind().expect("bind");
+        let near = Iec61850Transport::new(&address).timing_out_after(Duration::from_secs(5));
+        let reading = near.clone();
+        let reader = std::thread::spawn(move || {
+            let began = std::time::Instant::now();
+            for _ in 0..RECEIVES {
+                assert_eq!(reading.receive()?[0].bytes, b"held");
+            }
+            let took = began.elapsed();
+            // Generous for a debug build under load: a millisecond a read.
+            assert!(took < Duration::from_millis(RECEIVES as u64), "{took:?}");
+            reading.receive()
+        });
+        let serve = |session: &mut Session, reads: usize| {
+            let (mut initiated, mut read) = (0, 0);
+            while read < reads {
+                match session.next_event().expect("serving").expect("one") {
+                    Event::Initiated => initiated += 1,
+                    Event::Read { served: true, .. } => read += 1,
+                    other => panic!("{other:?}"),
+                }
+            }
+            initiated
+        };
+        let accept = || {
+            server
+                .accept_one(&listener)
+                .expect("an association")
+                .with_variable("XMIP", "Stream", b"held".to_vec())
+        };
+        // One connect and initiate for every read.
+        let mut session = accept();
+        assert_eq!(serve(&mut session, RECEIVES), 1);
+        drop(session);
+        let mut again = accept();
+        serve(&mut again, 1);
+        assert_eq!(
+            reader.join().expect("thread").expect("read")[0].bytes,
+            b"held"
+        );
+        assert_eq!(near.associations.opened(), 2);
     }
 
     #[test]
