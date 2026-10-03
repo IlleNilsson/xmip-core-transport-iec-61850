@@ -22,6 +22,10 @@
 //! here, in the same place, before this transport reaches it; the estate's
 //! two ends agree with each other today.
 //!
+//! **A receive is an MMS read, which consumes nothing at the server**, so
+//! its verdict has nothing to tell it, whichever it is: a cycle that did not
+//! complete loses nothing, and the next read finds the variable again.
+//!
 //! The origin URI names the server and the variable:
 //! `iec61850://host:102/XMIP/Stream`. A target is the same, or a bare
 //! `host:port` for the configured variable.
@@ -41,7 +45,7 @@ pub use session::{Event, Session};
 use transport::error::{Result, protocol_error};
 use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::{Arrived, Configured, Directions, Pool, Pooled, Transport};
+use transport::{Acknowledgement, Arrived, Configured, Directions, Pool, Pooled, Taken, Transport};
 use xcore::settings::{Applies, Fixed, Kind, Presence, Read, Setting, Settings};
 
 /// The TSAP a client presents, and the one a server listens on.
@@ -269,17 +273,25 @@ impl Transport for Iec61850Transport {
         Directions::BOTH
     }
 
+    fn arrivals(&self) -> transport::Arrivals {
+        transport::Arrivals::Ordered("a poll reads again what is not yet told")
+    }
+
     /// One read of the variable, on the association kept for the server
-    /// and initiated on the first receive: its bytes as one Stream.
+    /// and initiated on the first receive: its bytes as one Stream, whole.
+    /// The verdict has nothing to tell the server, whichever it is: an MMS
+    /// read consumes nothing, so a cycle that did not complete loses
+    /// nothing — the next read finds the variable again.
     fn receive(&self) -> Result<Vec<Arrived>> {
         let bytes = self.associations.exchange(
             self.bind.as_str(),
             || self.connect(&self.bind),
             |client| client.read(&self.domain, &self.item),
         )?;
-        Ok(vec![Arrived::new(
+        Ok(vec![Arrived::whole(
             format!("iec61850://{}/{}/{}", self.bind, self.domain, self.item),
             bytes,
+            Acknowledgement::unconsumed(),
         )])
     }
 
@@ -345,7 +357,7 @@ impl Iec61850Transport {
 }
 
 impl Accepting for Iec61850Transport {
-    fn take_one(self, listener: &TcpListener) -> Result<Arrived> {
+    fn take_one(self, listener: &TcpListener) -> Result<Taken> {
         let (domain, item) = (&self.domain, &self.item);
         let mut session = self
             .accept_one(listener)?
@@ -355,7 +367,7 @@ impl Accepting for Iec61850Transport {
             .variable(domain, item)
             .ok_or_else(|| protocol_error("the variable went missing"))?
             .to_vec();
-        Ok(Arrived::new(
+        Ok(Taken::new(
             format!("iec61850://{}/{domain}/{item}", session.peer()),
             bytes,
         ))
@@ -446,12 +458,22 @@ mod tests {
             first.variable("Relay", "Setting").map(<[u8]>::to_vec)
         });
         let near = Iec61850Transport::new(&address).timing_out_after(Duration::from_secs(2));
-        let arrived = near.receive().expect("read");
-        assert_eq!(arrived[0].bytes, b"held");
+        let arrived = near.receive().expect("read").remove(0);
+        assert!(arrived.defers(), "a read consumes nothing: nothing to lose");
+        let arrived = arrived.taken().expect("taken");
+        assert_eq!(arrived.bytes, b"held");
         assert_eq!(
-            arrived[0].origin_uri,
+            arrived.origin_uri,
             format!("iec61850://{address}/XMIP/Stream")
         );
+        // A refused cycle loses nothing: the next read finds it again.
+        near.receive()
+            .expect("read")
+            .remove(0)
+            .failed()
+            .expect("refused");
+        let again = near.receive().expect("again").remove(0);
+        assert_eq!(again.taken().expect("taken").bytes, b"held");
         near.send(&format!("iec61850://{address}/Relay/Setting"), &[7, 7])
             .expect("write");
         assert_eq!(near.associations.opened(), 1);
@@ -474,12 +496,12 @@ mod tests {
         let reader = std::thread::spawn(move || {
             let began = std::time::Instant::now();
             for _ in 0..RECEIVES {
-                assert_eq!(reading.receive()?[0].bytes, b"held");
+                assert_eq!(reading.receive()?.remove(0).taken()?.bytes, b"held");
             }
             let took = began.elapsed();
             // Generous for a debug build under load: a millisecond a read.
             assert!(took < Duration::from_millis(RECEIVES as u64), "{took:?}");
-            reading.receive()
+            reading.receive()?.remove(0).taken()
         });
         let serve = |session: &mut Session, reads: usize| {
             let (mut initiated, mut read) = (0, 0);
@@ -504,10 +526,7 @@ mod tests {
         drop(session);
         let mut again = accept();
         serve(&mut again, 1);
-        assert_eq!(
-            reader.join().expect("thread").expect("read")[0].bytes,
-            b"held"
-        );
+        assert_eq!(reader.join().expect("thread").expect("read").bytes, b"held");
         assert_eq!(near.associations.opened(), 2);
     }
 
