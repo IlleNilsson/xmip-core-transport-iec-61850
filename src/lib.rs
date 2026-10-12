@@ -276,6 +276,10 @@ impl Transport for Iec61850Transport {
         transport::Arrivals::Ordered("a poll reads again what is not yet told")
     }
 
+    fn waiting(&self) -> transport::Waiting {
+        transport::Waiting::Polled("a read of the variable returns at once")
+    }
+
     /// One read of the variable, on the association kept for the server
     /// and initiated on the first receive: its bytes as one Stream, whole.
     /// The verdict has nothing to tell the server, whichever it is: an MMS
