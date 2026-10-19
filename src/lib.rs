@@ -285,7 +285,7 @@ impl Transport for Iec61850Transport {
     /// The verdict has nothing to tell the server, whichever it is: an MMS
     /// read consumes nothing, so a cycle that did not complete loses
     /// nothing — the next read finds the variable again.
-    fn receive(&self) -> Result<Vec<Arrived>> {
+    fn receive_up_to(&self, _most: usize) -> Result<Vec<Arrived>> {
         let bytes = self.associations.exchange(
             self.bind.as_str(),
             || self.connect(&self.bind),
@@ -301,9 +301,14 @@ impl Transport for Iec61850Transport {
         ])
     }
 
+    fn sending(&self) -> transport::Sending {
+        transport::Sending::Gathered("one MMS write carries the whole value")
+    }
+
     /// One write of `bytes` to the variable `target` names, on the
     /// association kept for its server and initiated on the first send.
-    fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
+    fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
+        let bytes: &[u8] = &outgoing.gather()?;
         let (address, domain, item) = self.resolve(target)?;
         self.associations.exchange(
             address.as_str(),
