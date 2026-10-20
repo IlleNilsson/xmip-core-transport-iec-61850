@@ -7,7 +7,7 @@
 //!
 //! IEC 61850 is the substation's standard: every protection relay, merging
 //! unit and bay controller speaks it, MMS to the SCADA above on TCP port
-//! 102 and GOOSE sideways to its neighbours on raw Ethernet. What is here
+//! 102 and GOOSE sideways to its neighbors on raw Ethernet. What is here
 //! is the client-server side — the MMS PDUs this transport speaks
 //! ([`mms`]) on the estate's X.690 reader (`xmip-core-library-asn1`,
 //! shared with snmp), a client that initiates, reads,
