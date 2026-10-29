@@ -244,7 +244,7 @@ impl Iec61850Transport {
     /// the configured variable.
     fn resolve(&self, target: &str) -> Result<(String, String, String)> {
         let Some((authority, path)) =
-            Target::under(&["iec61850"], target).map(|named| (named.authority(), named.path()))
+            Target::under(Self::SCHEMES, target).map(|named| (named.authority(), named.path()))
         else {
             return Ok((target.to_string(), self.domain.clone(), self.item.clone()));
         };
@@ -348,6 +348,9 @@ impl Configured for Iec61850Transport {
             },
         ],
     };
+
+    /// The schemes a Location's address is entered with to choose this technology.
+    const SCHEMES: &'static [&'static str] = &["iec61850"];
 
     fn configured(address: &str, settings: &Read) -> Result<Self> {
         let transport = Self::new(address).about(settings.text("domain"), settings.text("item"));
