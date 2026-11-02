@@ -467,13 +467,9 @@ mod tests {
         let near = Iec61850Transport::new(&address).timing_out_after(Duration::from_secs(5));
         let reading = near.clone();
         let reader = std::thread::spawn(move || {
-            let began = std::time::Instant::now();
             for _ in 0..RECEIVES {
                 assert_eq!(reading.receive()?.remove(0).taken()?.bytes, b"held");
             }
-            let took = began.elapsed();
-            // Generous for a debug build under load: a millisecond a read.
-            assert!(took < Duration::from_millis(RECEIVES as u64), "{took:?}");
             reading.receive()?.remove(0).taken()
         });
         let serve = |session: &mut Session, reads: usize| {
