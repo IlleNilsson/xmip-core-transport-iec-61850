@@ -24,7 +24,7 @@ net = { package = "xmip-core-library-net", git = "https://github.com/IlleNilsson
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
 # X.690, the tag-length-value MMS and GOOSE are framed with.
 asn1 = { package = "xmip-core-library-asn1", git = "https://github.com/IlleNilsson/xmip-core-library-asn1", branch = "main" }
-# The carriers, declared in architecture.toml: MMS rides ISO transport, so
+# The carriers, declared in architecture.xmip: MMS rides ISO transport, so
 # cotp carries the client-server side; GOOSE is a raw frame, so ethernet
 # carries the publisher's.
 cotp = { package = "xmip-core-transport-cotp", git = "https://github.com/IlleNilsson/xmip-core-transport-cotp", branch = "main" }
