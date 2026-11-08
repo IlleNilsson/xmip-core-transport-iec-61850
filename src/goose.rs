@@ -96,11 +96,11 @@ impl Goose {
         if length != payload.len() {
             return Err(protocol_error("a GOOSE length that is not the payload's"));
         }
-        let (tag, fields, _) = asn1::read(&payload[8..])?;
+        let (tag, fields, _) = asn1::ber::read(&payload[8..])?;
         if tag != GOOSE_PDU {
             return Err(protocol_error("a PDU that is not a goosePDU"));
         }
-        let fields = asn1::read_all(fields)?;
+        let fields = asn1::ber::read_all(fields)?;
         let field = |n: u8| asn1::find(&fields, context(n, false));
         let number = |n: u8| -> Result<u32> {
             u32::try_from(asn1::read_integer(field(n)?)?)
@@ -116,7 +116,7 @@ impl Goose {
         }
         time.copy_from_slice(stamp);
         let mut data = Vec::new();
-        for (tag, entry) in asn1::read_all(asn1::find(&fields, context(11, true))?)? {
+        for (tag, entry) in asn1::ber::read_all(asn1::find(&fields, context(11, true))?)? {
             if tag != OCTET_STRING_DATA {
                 return Err(protocol_error(
                     "a data set entry that is not an octet string",
