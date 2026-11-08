@@ -122,7 +122,7 @@ impl Pdu {
     /// Not one of the PDUs this crate speaks, or one whose shape is not as
     /// the specification lays it out.
     pub fn decode(bytes: &[u8]) -> Result<Self> {
-        let (tag, contents, rest) = asn1::read(bytes)?;
+        let (tag, contents, rest) = asn1::ber::read(bytes)?;
         if !rest.is_empty() {
             return Err(protocol_error("bytes after the PDU"));
         }
@@ -207,7 +207,7 @@ fn variables(domain: &str, item: &str) -> Vec<u8> {
 }
 
 fn split_confirmed(contents: &[u8]) -> Result<(u32, u8, &[u8])> {
-    let (tag, invoke, rest) = asn1::read(contents)?;
+    let (tag, invoke, rest) = asn1::ber::read(contents)?;
     if tag != INTEGER {
         return Err(protocol_error(
             "a confirmed PDU without its invoke identifier",
@@ -215,7 +215,7 @@ fn split_confirmed(contents: &[u8]) -> Result<(u32, u8, &[u8])> {
     }
     let invoke = u32::try_from(asn1::read_integer(invoke)?)
         .map_err(|_| protocol_error("an invoke identifier outside thirty-two bits"))?;
-    let (service, body, rest) = asn1::read(rest)?;
+    let (service, body, rest) = asn1::ber::read(rest)?;
     if !rest.is_empty() {
         return Err(protocol_error("bytes after the service"));
     }
@@ -224,13 +224,13 @@ fn split_confirmed(contents: &[u8]) -> Result<(u32, u8, &[u8])> {
 
 /// The domain and item of a `listOfVariable [0]`.
 fn read_name(list: &[u8]) -> Result<(String, String)> {
-    let (_, sequence, _) = asn1::read(list)?;
-    let (_, object_name, _) = asn1::read(sequence)?;
-    let (tag, domain_specific, _) = asn1::read(object_name)?;
+    let (_, sequence, _) = asn1::ber::read(list)?;
+    let (_, object_name, _) = asn1::ber::read(sequence)?;
+    let (tag, domain_specific, _) = asn1::ber::read(object_name)?;
     if tag != context(1, true) {
         return Err(protocol_error("a name that is not domain-specific"));
     }
-    let parts = asn1::read_all(domain_specific)?;
+    let parts = asn1::ber::read_all(domain_specific)?;
     match parts.as_slice() {
         [(VISIBLE_STRING, domain), (VISIBLE_STRING, item)] => Ok((
             String::from_utf8_lossy(domain).into_owned(),
@@ -243,7 +243,7 @@ fn read_name(list: &[u8]) -> Result<(String, String)> {
 }
 
 fn read_octet_string(list: &[u8]) -> Result<Vec<u8>> {
-    let (tag, data, _) = asn1::read(list)?;
+    let (tag, data, _) = asn1::ber::read(list)?;
     if tag != OCTET_STRING_DATA {
         return Err(protocol_error("data that is not an octet string"));
     }
@@ -251,8 +251,8 @@ fn read_octet_string(list: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn decode_write(invoke: u32, body: &[u8]) -> Result<Pdu> {
-    let (_, list_of_variable, rest) = asn1::read(body)?;
-    let (_, list_of_data, _) = asn1::read(rest)?;
+    let (_, list_of_variable, rest) = asn1::ber::read(body)?;
+    let (_, list_of_data, _) = asn1::ber::read(rest)?;
     let (domain, item) = read_name(list_of_variable)?;
     Ok(Pdu::Write {
         invoke,
@@ -263,9 +263,9 @@ fn decode_write(invoke: u32, body: &[u8]) -> Result<Pdu> {
 }
 
 fn decode_read(invoke: u32, body: &[u8]) -> Result<Pdu> {
-    let elements = asn1::read_all(body)?;
+    let elements = asn1::ber::read_all(body)?;
     let specification = asn1::find(&elements, context(1, true))?;
-    let (_, list_of_variable, _) = asn1::read(specification)?;
+    let (_, list_of_variable, _) = asn1::ber::read(specification)?;
     let (domain, item) = read_name(list_of_variable)?;
     Ok(Pdu::Read {
         invoke,
@@ -275,7 +275,7 @@ fn decode_read(invoke: u32, body: &[u8]) -> Result<Pdu> {
 }
 
 fn decode_write_result(invoke: u32, body: &[u8]) -> Result<Pdu> {
-    let (tag, contents, _) = asn1::read(body)?;
+    let (tag, contents, _) = asn1::ber::read(body)?;
     match tag {
         t if t == context(1, false) || t == NULL => Ok(Pdu::WriteOk { invoke }),
         t if t == context(0, false) => Ok(Pdu::WriteFailed {
@@ -289,8 +289,8 @@ fn decode_write_result(invoke: u32, body: &[u8]) -> Result<Pdu> {
 }
 
 fn decode_read_result(invoke: u32, body: &[u8]) -> Result<Pdu> {
-    let (_, results, _) = asn1::read(body)?;
-    let (tag, contents, _) = asn1::read(results)?;
+    let (_, results, _) = asn1::ber::read(body)?;
+    let (tag, contents, _) = asn1::ber::read(results)?;
     match tag {
         OCTET_STRING_DATA => Ok(Pdu::ReadOk {
             invoke,
