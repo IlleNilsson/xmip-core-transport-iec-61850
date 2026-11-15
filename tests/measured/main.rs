@@ -6,12 +6,19 @@
 //! (`cargo test --test measured --all-features -- --test-threads=1`), so
 //! what is measured is Xmip's work and not its neighbors':
 //!
-//! - a thousand reads on one association take a millisecond each at most.
+//! - a thousand reads on one association take a millisecond each at most
+//!   beyond their wakes, round by round beside a plain wake, the fastest of
+//!   five (`xcore::latency::Rounds`).
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use transport::Transport;
+use xcore::latency::Rounds;
 use xmip_core_transport_iec_61850::{Event, Iec61850Transport};
+
+/// What a read wakes where a plain wake wakes one: the far end at the MMS
+/// Read, and this end at its answer.
+const WAKES: u32 = 2;
 
 #[test]
 fn a_thousand_reads_take_a_millisecond_each_at_most() {
@@ -20,14 +27,12 @@ fn a_thousand_reads_take_a_millisecond_each_at_most() {
     let (listener, address) = server.bind().expect("bind");
     let near = Iec61850Transport::new(&address).timing_out_after(Duration::from_secs(5));
     let reader = std::thread::spawn(move || {
-        let began = Instant::now();
+        let mut rounds = Rounds::crossing(WAKES);
         for _ in 0..RECEIVES {
-            assert_eq!(near.receive()?.remove(0).taken()?.bytes, b"held");
+            let read = rounds.round(|| near.receive()?.remove(0).taken())?;
+            assert_eq!(read.bytes, b"held");
         }
-        let took = began.elapsed();
-        // Generous for a debug build under load: a millisecond a read.
-        assert!(took < Duration::from_millis(RECEIVES as u64), "{took:?}");
-        Ok::<_, transport::TransportError>(())
+        Ok::<_, transport::TransportError>(rounds)
     });
     let mut session = server
         .accept_one(&listener)
@@ -41,5 +46,6 @@ fn a_thousand_reads_take_a_millisecond_each_at_most() {
             other => panic!("{other:?}"),
         }
     }
-    reader.join().expect("thread").expect("reading");
+    let rounds = reader.join().expect("thread").expect("reading");
+    rounds.hold("a read");
 }
