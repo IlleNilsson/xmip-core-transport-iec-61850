@@ -6,7 +6,7 @@ use std::net::TcpListener;
 use transport::error::{Result, protocol_error};
 use transport::listening::{Accepting, Listening};
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::{ArrivalIdentity, Taken, Transport};
+use transport::{ArrivalIdentity, Configured, Taken, Transport};
 
 use crate::Iec61850Transport;
 

@@ -209,13 +209,6 @@ impl Iec61850Transport {
         self
     }
 
-    /// Give up on a peer that stops mid-message.
-    #[must_use]
-    pub const fn timing_out_after(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
-        self
-    }
-
     /// Bind through the carrier and report the address actually assigned.
     ///
     /// # Errors
@@ -338,26 +331,24 @@ impl Configured for Iec61850Transport {
                 meaning: "The item of the variable that is the Stream, within its domain.",
                 applies: Applies::Both,
             },
-            Setting {
-                name: "timeout",
-                kind: Kind::Duration,
-                presence: Presence::Optional,
-                meaning: "How long a peer that stops mid-message is waited on; unbounded when \
-                          left out.",
-                applies: Applies::Both,
-            },
+            transport::configured::timeout(
+                Applies::Both,
+                None,
+                "How long a peer that stops mid-message is waited on; unbounded when \
+                 left out.",
+            ),
         ],
     };
 
     /// The schemes a Location's address is entered with to choose this technology.
     const SCHEMES: &'static [&'static str] = &["iec61850"];
 
+    fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
+        Some(&mut self.timeout)
+    }
+
     fn configured(address: &str, settings: &Read) -> Result<Self> {
-        let transport = Self::new(address).about(settings.text("domain"), settings.text("item"));
-        Ok(match settings.optional_duration("timeout") {
-            Some(timeout) => transport.timing_out_after(timeout),
-            None => transport,
-        })
+        Ok(Self::new(address).about(settings.text("domain"), settings.text("item")))
     }
 }
 
