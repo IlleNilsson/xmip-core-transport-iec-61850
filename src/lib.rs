@@ -29,38 +29,63 @@
 //! The origin URI names the server and the variable:
 //! `iec61850://host:102/XMIP/Stream`. A target is the same, or a bare
 //! `host:port` for the configured variable.
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location of it is configured with, and none of
+//! the code above, which is behind the default feature: what the surfaces'
+//! library carries (ADR-0064, amendment 2026-11-26). The variable a Stream
+//! travels as unless a target says otherwise, `STREAM_DOMAIN` and
+//! `STREAM_ITEM`, is declared there with it.
 
+#[cfg(feature = "declaration")]
+pub mod declaration;
+#[cfg(feature = "default")]
 pub mod goose;
+#[cfg(feature = "default")]
 mod loopback;
+#[cfg(feature = "default")]
 pub mod mms;
+#[cfg(feature = "default")]
 pub mod session;
 
+#[cfg(feature = "default")]
 use std::net::TcpListener;
+#[cfg(feature = "default")]
 use std::time::Duration;
 
+#[cfg(feature = "default")]
 use cotp::Connection;
+#[cfg(feature = "default")]
+use declaration::{STREAM_DOMAIN, STREAM_ITEM};
+#[cfg(feature = "default")]
 pub use goose::Goose;
+#[cfg(feature = "default")]
 pub use mms::Pdu;
+#[cfg(feature = "default")]
 use net::Target;
+#[cfg(feature = "default")]
 pub use session::{Event, Session};
+#[cfg(feature = "default")]
 use transport::error::{Result, protocol_error};
+#[cfg(feature = "default")]
 use transport::{Acknowledgement, Arrived, Configured, Directions, Pool, Pooled, Transport};
-use xcore::settings::{Applies, Fixed, Kind, Presence, Read, Setting, Settings};
+#[cfg(feature = "default")]
+use xcore::settings::{Read, Settings};
 
 /// The TSAP a client presents, and the one a server listens on.
+#[cfg(feature = "default")]
 const CLIENT_TSAP: [u8; 2] = [0x00, 0x01];
+#[cfg(feature = "default")]
 const SERVER_TSAP: [u8; 2] = [0x00, 0x01];
 
-/// The variable a Stream travels as unless a target says otherwise.
-const STREAM_DOMAIN: &str = "XMIP";
-const STREAM_ITEM: &str = "Stream";
-
 /// One association with a server.
+#[cfg(feature = "default")]
 pub struct Client {
     connection: Connection,
     invoke: u32,
 }
 
+#[cfg(feature = "default")]
 impl Client {
     /// Connect to the server at `address` and initiate.
     ///
@@ -72,7 +97,7 @@ impl Client {
             address,
             &CLIENT_TSAP,
             &SERVER_TSAP,
-            cotp::tpdu::DEFAULT_SIZE_CODE,
+            cotp::declaration::DEFAULT_SIZE_CODE,
             timeout,
         )?;
         let mut client = Self {
@@ -164,6 +189,7 @@ impl Client {
     }
 }
 
+#[cfg(feature = "default")]
 impl Pooled for Client {
     /// While the server has not closed the association's connection.
     fn usable(&mut self) -> bool {
@@ -171,12 +197,14 @@ impl Pooled for Client {
     }
 }
 
+#[cfg(feature = "default")]
 fn refused(domain: &str, item: &str, error: i64) -> transport::TransportError {
     protocol_error(format!(
         "{domain}/{item}: the server answered data access error {error}"
     ))
 }
 
+#[cfg(feature = "default")]
 #[derive(Clone)]
 pub struct Iec61850Transport {
     bind: String,
@@ -188,6 +216,7 @@ pub struct Iec61850Transport {
     associations: Pool<Client>,
 }
 
+#[cfg(feature = "default")]
 impl Iec61850Transport {
     /// Listen or connect at `bind`, about `XMIP/Stream`.
     #[must_use]
@@ -256,6 +285,7 @@ impl Iec61850Transport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Transport for Iec61850Transport {
     fn name(&self) -> &'static str {
         "iec-61850"
@@ -311,37 +341,10 @@ impl Transport for Iec61850Transport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Configured for Iec61850Transport {
-    /// The address is the server's host and port, 102 by the standard:
-    /// where a Location connects.
-    const SETTINGS: &'static Settings = &Settings {
-        technology: env!("CARGO_PKG_NAME"),
-        settings: &[
-            Setting {
-                name: "domain",
-                kind: Kind::Text,
-                presence: Presence::Default(Fixed::Text(STREAM_DOMAIN)),
-                meaning: "The domain of the variable that is the Stream.",
-                applies: Applies::Both,
-            },
-            Setting {
-                name: "item",
-                kind: Kind::Text,
-                presence: Presence::Default(Fixed::Text(STREAM_ITEM)),
-                meaning: "The item of the variable that is the Stream, within its domain.",
-                applies: Applies::Both,
-            },
-            transport::configured::timeout(
-                Applies::Both,
-                None,
-                "How long a peer that stops mid-message is waited on; unbounded when \
-                 left out.",
-            ),
-        ],
-    };
-
-    /// The schemes a Location's address is entered with to choose this technology.
-    const SCHEMES: &'static [&'static str] = &["iec61850"];
+    const SETTINGS: &'static Settings = declaration::SETTINGS;
+    const SCHEMES: &'static [&'static str] = declaration::SCHEMES;
 
     fn timeout_kept(&mut self) -> Option<&mut dyn transport::configured::TimeoutKept> {
         Some(&mut self.timeout)
@@ -359,7 +362,7 @@ mod tests {
 
     #[test]
     fn iec_61850_declares_its_settings_and_reads_through_them() {
-        use xcore::settings::Given;
+        use xcore::settings::{Applies, Given};
         assert_eq!(Iec61850Transport::SETTINGS.problems(), Vec::<String>::new());
         let given = [
             ("domain".to_string(), Given::Text("BAY1".to_string())),
